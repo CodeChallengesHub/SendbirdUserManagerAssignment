@@ -10,7 +10,9 @@ import XCTest
 
 final class UserManagerTests: UserManagerBaseTests {
     override func userManager() -> SBUserManager {
-        MockUserManager()
+        let networkClient = MockNetworkClient()
+        let userStorage = MockUserStorage()
+        return MockUserManager(networkClient: networkClient, userStorage: userStorage)
     }
 }
 
