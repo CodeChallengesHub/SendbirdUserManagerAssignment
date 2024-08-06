@@ -14,8 +14,8 @@ import XCTest
 open class UserManagerBaseTests: XCTestCase {
     open func userManager() -> SBUserManager? { nil }
     
-    public let applicationId = ""   // Note: add an application ID
-    public let apiToken = ""        // Note: add an API Token
+    public let applicationId = "5340ABA8-0AD7-442C-B02B-C168626BFF7B"   // Note: add an application ID
+    public let apiToken = "7a726024bc5f55911732e3b2c02b0b4c1f9b5832"    // Note: add an API Token
     
     public func testInitApplicationWithDifferentAppIdClearsData() throws {
         let userManager = try XCTUnwrap(self.userManager())
