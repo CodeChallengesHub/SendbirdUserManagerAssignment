@@ -13,6 +13,9 @@ class MockUserManager: SBUserManager {
     let networkClient: SBNetworkClient
     let userStorage: SBUserStorage
     
+    private var applicationId: String = ""
+    private var apiToken: String = ""
+    
     init(networkClient: SBNetworkClient, userStorage: SBUserStorage) {
         self.networkClient = networkClient
         self.userStorage = userStorage
@@ -25,7 +28,8 @@ class MockUserManager: SBUserManager {
     ///    - applicationId: Sendbird의 Application ID
     ///    - apiToken: 해당 Application에서 발급된 API Token
     func initApplication(applicationId: String, apiToken: String) {
-        
+        self.applicationId = applicationId
+        self.apiToken = apiToken
     }
     
     /// UserCreationParams를 사용하여 새로운 유저를 생성합니다.
@@ -35,7 +39,14 @@ class MockUserManager: SBUserManager {
     ///    - params: User를 생성하기 위한 값들의 struct
     ///    - completionHandler: 생성이 완료된 뒤, user객체와 에러 여부를 담은 completion Handler
     func createUser(params: UserCreationParams, completionHandler: ((UserResult) -> Void)?) {
-        
+        guard let request = UserRequest(
+            applicationId: applicationId,
+            apiToken: apiToken,
+            params: params
+        ) else { return }
+        networkClient.request(request: request) { result in
+            completionHandler?(result)
+        }
     }
     
     /// UserCreationParams List를 사용하여 새로운 유저들을 생성합니다.
