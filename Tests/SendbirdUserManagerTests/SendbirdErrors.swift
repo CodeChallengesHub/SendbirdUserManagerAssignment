@@ -1,0 +1,36 @@
+//
+//  SendbirdErrors.swift
+//
+//
+//  Created by TAE SU LEE on 8/8/24.
+//
+
+import Foundation
+
+enum SendbirdError: Error {
+    case request(RequestError)
+    case network(NetworkError)
+    case validation(ValidationError)
+    case decoding(DecodingError)
+    case unknown(String)
+    
+    enum RequestError: Error {
+        case createFailure(String)
+        case invalidRequest(String)
+    }
+    
+    enum NetworkError: Error {
+        case invalidResponse(String)
+        case invalidStatusCode(Int)
+        case invalidData(String)
+        case combined([Error])
+    }
+    
+    enum ValidationError: Error {
+        case tooManyUsers(String)
+    }
+    
+    enum DecodingError: Error {
+        case decodingFailure(String)
+    }
+}

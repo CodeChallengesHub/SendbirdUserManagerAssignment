@@ -25,53 +25,92 @@ enum MethodType: String {
     case put = "PUT"
 }
 
-// NetworkError 정의
-enum NetworkError: Error {
-    case invalidResponse
-    case invalidData
-    case invalidUrl
-    case decodingError
-}
+typealias UserID = String
+typealias Nickname = String
 
-struct UserRequest: Request, URLRequestProvider {
-    typealias Response = SBUser
+enum RequestType {
+    case createUser(UserCreationParams)
+    case updateUser(UserID, UserUpdateParams)
+    case getUserById(UserID)
+    case getUserByNickname(Nickname)
     
-    private let requestUrl: URL
-    private let apiToken: String
-    private let bodyData: Data
+    var method: MethodType {
+        switch self {
+        case .createUser:
+            return .post
+        case .updateUser:
+            return .put
+        case .getUserById, .getUserByNickname:
+            return .get
+        }
+    }
     
-    init?(applicationId: String, apiToken: String, params: UserCreationParams) {
-        guard let url = URL(string: "https://api-\(applicationId).sendbird.com/v3/users") else { return nil }
-        self.requestUrl = url
-        self.apiToken = apiToken
-        do {
-            let jsonData = try JSONSerialization.data(withJSONObject: params.toDictionary(), options: [])
-            self.bodyData = jsonData
-        } catch {
+    var path: String {
+        switch self {
+        case .createUser, .getUserByNickname:
+            return "/v3/users"
+        case .updateUser(let userId, _):
+            return "/v3/users/\(userId)"
+        case .getUserById(let userId):
+            return "/v3/users/\(userId)"
+        }
+    }
+    
+    var body: Data? {
+        switch self {
+        case .createUser(let params):
+            return try? JSONSerialization.data(withJSONObject: params.toDictionary(), options: [])
+        case .updateUser(_, let params):
+            return try? JSONSerialization.data(withJSONObject: params.toDictionary(), options: [])
+        case .getUserById, .getUserByNickname:
             return nil
         }
     }
     
-    var url: URL { requestUrl }
-    var method: MethodType { .post }
-    var body: Data? { bodyData }
-    var headers: [String : String] {
-        [
-            "Api-Token": apiToken,
+    var headers: [String: String] {
+        return [
             "Content-Type": "application/json",
             "Accept": "application/json"
         ]
     }
-    var mockResponse: Data?
     
-    func parseResponse(_ data: Data) throws -> Any {
-        guard let jsonDict = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let userId = jsonDict["user_id"] as? String,
-              let nickname = jsonDict["nickname"] as? String else {
-            throw NetworkError.decodingError
+    var mockResponse: Data? {
+        return nil
+    }
+}
+
+struct UserRequest<T: Decodable>: Request, URLRequestProvider {
+    typealias Response = T
+    
+    let requestUrl: URL
+    let applicationId: String
+    let apiToken: String
+    let requestType: RequestType
+    
+    init(applicationId: String, apiToken: String, requestType: RequestType) throws {
+        let urlString = "https://api-\(applicationId).sendbird.com" + requestType.path
+        guard let url = URL(string: urlString) else {
+            throw SendbirdError.request(.createFailure("Failed to create UserRequest due to invalid URL: \(urlString)"))
         }
-        let profileURL = jsonDict["profile_url"] as? String
-        return SBUser(userId: userId, nickname: nickname, profileURL: profileURL)
+        self.requestUrl = url
+        self.applicationId = applicationId
+        self.apiToken = apiToken
+        self.requestType = requestType
+    }
+    
+    var url: URL { requestUrl }
+    var method: MethodType { requestType.method }
+    var body: Data? { requestType.body }
+    var headers: [String: String] {
+        requestType.headers.merging([ "Api-Token": apiToken ]) { (_, new) in new }
+    }
+    var mockResponse: Data? { requestType.mockResponse }
+    func parseResponse(_ data: Data) throws -> Any {
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw SendbirdError.decoding(.decodingFailure(error.localizedDescription))
+        }
     }
 }
 
@@ -86,22 +125,26 @@ class MockNetworkClient: SBNetworkClient {
         request: R,
         completionHandler: @escaping (Result<R.Response, Error>) -> Void
     ) {
-        guard let urlRequestProvider = request as? URLRequestProvider else {
-            completionHandler(.failure(NetworkError.invalidData))
+        guard let request = request as? URLRequestProvider else {
+            completionHandler(.failure(SendbirdError.request(.invalidRequest("Request does not conform to URLRequestProvider protocol."))))
             return
         }
         
-        var urlRequest = URLRequest(url: urlRequestProvider.url)
-        urlRequest.httpMethod = urlRequestProvider.method.rawValue
-        urlRequestProvider.headers.forEach { urlRequest.addValue($1, forHTTPHeaderField: $0) }
-        if let body = urlRequestProvider.body {
+        var urlRequest = URLRequest(url: request.url)
+        urlRequest.httpMethod = request.method.rawValue
+        request.headers.forEach { urlRequest.addValue($1, forHTTPHeaderField: $0) }
+        if let body = request.body {
             urlRequest.httpBody = body
         }
         
         // 요청 로그
-        print("NetworkClient --> \(urlRequest.httpMethod ?? "N/A") \(urlRequestProvider.url.absoluteString)")
+        print("NetworkClient --> \(urlRequest.httpMethod ?? "N/A") \(urlRequest.url?.absoluteString ?? "")")
         print("NetworkClient Headers: \(urlRequest.allHTTPHeaderFields ?? [:])")
-        print("NetworkClient HttpBody: \(String(data: urlRequest.httpBody ?? Data(), encoding: .utf8) ?? "N/A")")
+        if let httpBody = urlRequest.httpBody {
+            print("NetworkClient HttpBody: \(String(data: httpBody, encoding: .utf8) ?? "N/A")")
+        } else {
+            print("NetworkClient HttpBody: N/A")
+        }
         
         let task = session.dataTask(with: urlRequest) { data, response, error in
             if let error = error {
@@ -109,33 +152,38 @@ class MockNetworkClient: SBNetworkClient {
                 return
             }
             
-            // 응답 로그
-            if let httpResponse = response as? HTTPURLResponse {
-                print("NetworkClient <-- \(httpResponse.statusCode) \(response?.url?.absoluteString ?? "")")
-                if let data = data {
-                    print("NetworkClient Response: \(String(data: data, encoding: .utf8) ?? "")")
-                }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completionHandler(.failure(SendbirdError.network(.invalidResponse("Expected HTTPURLResponse but received different type"))))
+                return
             }
             
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                completionHandler(.failure(NetworkError.invalidResponse))
+            // 응답 로그
+            print("NetworkClient <-- \(httpResponse.statusCode) \(response?.url?.absoluteString ?? "")")
+            if let data = data, let responseString = String(data: data, encoding: .utf8), !responseString.isEmpty {
+                print("NetworkClient Response: \(responseString)")
+            } else {
+                print("NetworkClient Response: N/A")
+            }
+            
+            guard (200...299).contains(httpResponse.statusCode) else {
+                completionHandler(.failure(SendbirdError.network(.invalidStatusCode(httpResponse.statusCode))))
                 return
             }
             
             guard let data = data else {
-                completionHandler(.failure(NetworkError.invalidData))
+                    completionHandler(.failure(SendbirdError.network(.invalidData("No data received from the server."))))
                 return
             }
             
             do {
-                if let response = try urlRequestProvider.parseResponse(data) as? R.Response {
+                if let response = try request.parseResponse(data) as? R.Response {
                     completionHandler(.success(response))
                 } else {
-                    completionHandler(.failure(NetworkError.decodingError))
+                    let responseDataString = String(data: data, encoding: .utf8) ?? "Unable to decode data"
+                    completionHandler(.failure(SendbirdError.network(.invalidData("Failed to parse response: \(responseDataString)"))))
                 }
             } catch {
-                completionHandler(.failure(NetworkError.decodingError))
+                completionHandler(.failure(error))
             }
         }
         
