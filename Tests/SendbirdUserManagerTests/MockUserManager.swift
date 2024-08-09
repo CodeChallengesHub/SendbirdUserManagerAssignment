@@ -61,7 +61,48 @@ class MockUserManager: SBUserManager {
     ///    - params: User를 생성하기 위한 값들의 struct
     ///    - completionHandler: 생성이 완료된 뒤, user객체와 에러 여부를 담은 completion Handler
     func createUsers(params: [UserCreationParams], completionHandler: ((UsersResult) -> Void)?) {
+        let maxUserCount = 10
+        guard params.count <= maxUserCount else {
+            let errorMessage = "Too many users to create. The maximum allowed number of users is \(maxUserCount), but \(params.count) were provided."
+            completionHandler?(.failure(SendbirdError.validation(.tooManyUsers(errorMessage))))
+            return
+        }
         
+        var users: [SBUser?] = Array(repeating: nil, count: params.count) // 요청 순서를 유지하기 위한 배열
+        var errors: [Error] = []
+        let dispatchGroup = DispatchGroup()
+        
+        for (index, param) in params.enumerated() {
+            dispatchGroup.enter()
+            do {
+                let request = try UserRequest<SBUser>(
+                    applicationId: applicationId,
+                    apiToken: apiToken,
+                    requestType: .createUser(param)
+                )
+                self.networkClient.request(request: request) { result in
+                    switch result {
+                    case .success(let user):
+                        users[index] = user // 요청 순서에 맞게 결과 저장
+                    case .failure(let error):
+                        errors.append(error)
+                    }
+                    dispatchGroup.leave()
+                }
+            } catch {
+                errors.append(error)
+                dispatchGroup.leave()
+            }
+        }
+        
+        dispatchGroup.notify(queue: .main) {
+            if errors.isEmpty {
+                // users 배열에서 nil을 제거하고 결과 반환
+                completionHandler?(.success(users.compactMap { $0 }))
+            } else {
+                completionHandler?(.failure(SendbirdError.network(.combined(errors))))
+            }
+        }
     }
     
     /// 특정 User의 nickname 또는 profileURL을 업데이트합니다
@@ -104,6 +145,30 @@ class MockUserManager: SBUserManager {
     /// GET API를 호출하고 캐시에 저장합니다
     /// Get users API를 활용할 때 limit은 100으로 고정합니다
     func getUsers(nicknameMatches: String, completionHandler: ((UsersResult) -> Void)?) {
-        
+        guard !nicknameMatches.trimmingCharacters(in: .whitespaces).isEmpty else {
+            completionHandler?(.failure(SendbirdError.validation(.invalidNickname("Nickname cannot be empty or consist only of whitespace."))))
+            return
+        }
+        do {
+            let request = try UserRequest<SBUsersResponse>(
+                applicationId: applicationId,
+                apiToken: apiToken,
+                requestType: .getUserByNickname(nicknameMatches)
+            )
+            networkClient.request(request: request) { result in
+                switch result {
+                case .success(let success):
+                    if !success.users.isEmpty {
+                        completionHandler?(.success(success.users))
+                    } else {
+                        completionHandler?(.failure(SendbirdError.response(.empty("No users found matching the provided nickname."))))
+                    }
+                case .failure(let failure):
+                    completionHandler?(.failure(failure))
+                }
+            }
+        } catch {
+            completionHandler?(.failure(error))
+        }
     }
 }

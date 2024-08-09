@@ -28,7 +28,7 @@ enum MethodType: String {
 typealias UserID = String
 typealias Nickname = String
 
-enum RequestType {
+enum UserRequestType {
     case createUser(UserCreationParams)
     case updateUser(UserID, UserUpdateParams)
     case getUserById(UserID)
@@ -67,6 +67,18 @@ enum RequestType {
         }
     }
     
+    var queryItems: [URLQueryItem]? {
+        switch self {
+        case .createUser, .updateUser, .getUserById:
+            return nil
+        case .getUserByNickname(let nickname):
+            return [
+                .init(name: "limit", value: "100"),
+                .init(name: "nickname", value: nickname.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed))
+            ]
+        }
+    }
+    
     var headers: [String: String] {
         return [
             "Content-Type": "application/json",
@@ -85,12 +97,14 @@ struct UserRequest<T: Decodable>: Request, URLRequestProvider {
     let requestUrl: URL
     let applicationId: String
     let apiToken: String
-    let requestType: RequestType
+    let requestType: UserRequestType
     
-    init(applicationId: String, apiToken: String, requestType: RequestType) throws {
+    init(applicationId: String, apiToken: String, requestType: UserRequestType) throws {
         let urlString = "https://api-\(applicationId).sendbird.com" + requestType.path
-        guard let url = URL(string: urlString) else {
-            throw SendbirdError.request(.createFailure("Failed to create UserRequest due to invalid URL: \(urlString)"))
+        var urlComponents = URLComponents(string: urlString)
+        urlComponents?.queryItems = requestType.queryItems
+        guard let url = urlComponents?.url else {
+            throw SendbirdError.request(.createFailure("Failed to create UserRequest due to invalid URL: \(urlComponents?.url?.absoluteString ?? urlString)"))
         }
         self.requestUrl = url
         self.applicationId = applicationId
@@ -116,12 +130,29 @@ struct UserRequest<T: Decodable>: Request, URLRequestProvider {
 
 class MockNetworkClient: SBNetworkClient {
     private let session: URLSession
+    private let rateLimiter: TokenBucketRateLimiter
     
     init(session: URLSession = .shared) {
         self.session = session
+        self.rateLimiter = TokenBucketRateLimiter(maxTokens: 10)
     }
     
     func request<R: Request>(
+        request: R,
+        completionHandler: @escaping (Result<R.Response, Error>) -> Void
+    ) {
+        rateLimiter.executeRequest { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success:
+                self.sendRequest(request: request, completionHandler: completionHandler)
+            case .failure(let error):
+                completionHandler(.failure(error))
+            }
+        }
+    }
+    
+    private func sendRequest<R: Request>(
         request: R,
         completionHandler: @escaping (Result<R.Response, Error>) -> Void
     ) {
@@ -171,7 +202,7 @@ class MockNetworkClient: SBNetworkClient {
             }
             
             guard let data = data else {
-                    completionHandler(.failure(SendbirdError.network(.invalidData("No data received from the server."))))
+                completionHandler(.failure(SendbirdError.network(.invalidData("No data received from the server."))))
                 return
             }
             

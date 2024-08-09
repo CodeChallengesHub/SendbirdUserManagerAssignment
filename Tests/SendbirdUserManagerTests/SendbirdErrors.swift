@@ -9,6 +9,7 @@ import Foundation
 
 enum SendbirdError: Error {
     case request(RequestError)
+    case response(ResponseError)
     case network(NetworkError)
     case validation(ValidationError)
     case decoding(DecodingError)
@@ -19,15 +20,21 @@ enum SendbirdError: Error {
         case invalidRequest(String)
     }
     
+    enum ResponseError: Error {
+        case empty(String)
+    }
+    
     enum NetworkError: Error {
         case invalidResponse(String)
         case invalidStatusCode(Int)
         case invalidData(String)
+        case tooManyRequests(String)
         case combined([Error])
     }
     
     enum ValidationError: Error {
         case tooManyUsers(String)
+        case invalidNickname(String)
     }
     
     enum DecodingError: Error {
