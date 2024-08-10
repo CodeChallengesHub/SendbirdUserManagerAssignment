@@ -130,11 +130,11 @@ struct UserRequest<T: Decodable>: Request, URLRequestProvider {
 
 class MockNetworkClient: SBNetworkClient {
     private let session: URLSession
-    private let rateLimiter: TokenBucketRateLimiter
+    private let rateLimiter: TokenLeakyBucketRateLimiter
     
     init(session: URLSession = .shared) {
         self.session = session
-        self.rateLimiter = TokenBucketRateLimiter(maxTokens: 10)
+        self.rateLimiter = TokenLeakyBucketRateLimiter(bucketCapacity: 10, leakInterval: 1)
     }
     
     func request<R: Request>(
