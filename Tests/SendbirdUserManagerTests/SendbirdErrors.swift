@@ -9,7 +9,6 @@ import Foundation
 
 enum SendbirdError: Error {
     case request(RequestError)
-    case response(ResponseError)
     case network(NetworkError)
     case validation(ValidationError)
     case decoding(DecodingError)
@@ -18,10 +17,6 @@ enum SendbirdError: Error {
     enum RequestError: Error {
         case createFailure(String)
         case invalidRequest(String)
-    }
-    
-    enum ResponseError: Error {
-        case empty(String)
     }
     
     enum NetworkError: Error {

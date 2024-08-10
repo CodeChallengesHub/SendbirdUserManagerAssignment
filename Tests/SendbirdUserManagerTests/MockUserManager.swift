@@ -28,6 +28,9 @@ class MockUserManager: SBUserManager {
     ///    - applicationId: Sendbird의 Application ID
     ///    - apiToken: 해당 Application에서 발급된 API Token
     func initApplication(applicationId: String, apiToken: String) {
+        if self.applicationId != applicationId {
+            userStorage.clearAllUsers()
+        }
         self.applicationId = applicationId
         self.apiToken = apiToken
     }
@@ -45,8 +48,15 @@ class MockUserManager: SBUserManager {
                 apiToken: apiToken,
                 requestType: .createUser(params)
             )
-            networkClient.request(request: request) { result in
-                completionHandler?(result)
+            networkClient.request(request: request) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let user):
+                    self.userStorage.upsertUser(user)
+                    completionHandler?(.success(user))
+                case .failure(let error):
+                    completionHandler?(.failure(error))
+                }
             }
         } catch {
             completionHandler?(.failure(error))
@@ -95,10 +105,15 @@ class MockUserManager: SBUserManager {
             }
         }
         
-        dispatchGroup.notify(queue: .main) {
+        dispatchGroup.notify(queue: .main) { [weak self] in
+            guard let self = self else { return }
+            // users 배열에서 nil을 제거하고 결과 반환
+            let users = users.compactMap { $0 }
+            users.forEach { user in
+                self.userStorage.upsertUser(user)
+            }
             if errors.isEmpty {
-                // users 배열에서 nil을 제거하고 결과 반환
-                completionHandler?(.success(users.compactMap { $0 }))
+                completionHandler?(.success(users))
             } else {
                 completionHandler?(.failure(SendbirdError.network(.combined(errors))))
             }
@@ -114,9 +129,15 @@ class MockUserManager: SBUserManager {
                 apiToken: apiToken,
                 requestType: .updateUser(params.userId, params)
             )
-            
-            networkClient.request(request: request) { result in
-                completionHandler?(result)
+            networkClient.request(request: request) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let user):
+                    self.userStorage.upsertUser(user)
+                    completionHandler?(.success(user))
+                case .failure(let error):
+                    completionHandler?(.failure(error))
+                }
             }
         } catch {
             completionHandler?(.failure(error))
@@ -127,14 +148,26 @@ class MockUserManager: SBUserManager {
     /// 캐시에 해당 User가 있으면 캐시된 User를 반환합니다
     /// 캐시에 해당 User가 없으면 /GET API 호출하고 캐시에 저장합니다
     func getUser(userId: String, completionHandler: ((UserResult) -> Void)?) {
+        if let cachedUser = userStorage.getUser(for: userId) {
+            completionHandler?(.success(cachedUser))
+            return
+        }
+        
         do {
             let request = try UserRequest<SBUser>(
                 applicationId: applicationId,
                 apiToken: apiToken,
                 requestType: .getUserById(userId)
             )
-            networkClient.request(request: request) { result in
-                completionHandler?(result)
+            networkClient.request(request: request) { [weak self] result in
+                guard let self = self else { return }
+                switch result {
+                case .success(let user):
+                    self.userStorage.upsertUser(user)
+                    completionHandler?(.success(user))
+                case .failure(let error):
+                    completionHandler?(.failure(error))
+                }
             }
         } catch {
             completionHandler?(.failure(error))
@@ -155,14 +188,17 @@ class MockUserManager: SBUserManager {
                 apiToken: apiToken,
                 requestType: .getUserByNickname(nicknameMatches)
             )
-            networkClient.request(request: request) { result in
+            networkClient.request(request: request) { [weak self] result in
+                guard let self = self else { return }
                 switch result {
                 case .success(let success):
-                    if !success.users.isEmpty {
-                        completionHandler?(.success(success.users))
-                    } else {
-                        completionHandler?(.failure(SendbirdError.response(.empty("No users found matching the provided nickname."))))
+                    let users = success.users
+                    if !users.isEmpty {
+                        users.forEach { user in
+                            self.userStorage.upsertUser(user)
+                        }
                     }
+                    completionHandler?(.success(users))
                 case .failure(let failure):
                     completionHandler?(.failure(failure))
                 }

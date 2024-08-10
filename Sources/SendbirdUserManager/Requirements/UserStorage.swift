@@ -18,4 +18,7 @@ public protocol SBUserStorage {
     func getUsers(for nickname: String) -> [SBUser]
     /// 현재 저장되어있는 유저들 중에 지정된 userId를 가진 유저를 반환합니다.
     func getUser(for userId: String) -> (SBUser)?
+    
+    // 모든 데이터를 초기화하는 메서드 추가
+    func clearAllUsers()
 }
