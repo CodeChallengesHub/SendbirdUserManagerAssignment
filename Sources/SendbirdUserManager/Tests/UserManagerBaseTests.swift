@@ -21,15 +21,20 @@ open class UserManagerBaseTests: XCTestCase {
         let userManager = try XCTUnwrap(self.userManager())
         
         // First init
-        userManager.initApplication(applicationId: "AppID1", apiToken: "Token1")    // Note: Add the first application ID and API Token
+        userManager.initApplication(applicationId: applicationId, apiToken: apiToken)    // Note: Add the first application ID and API Token
         
         let userId = UUID().uuidString
         let initialUser = UserCreationParams(userId: userId, nickname: "hello", profileURL: nil)
-        userManager.createUser(params: initialUser) { _ in }
+        let expectation = self.expectation(description: "Wait for user creation")
         
-        // Check if the data exist
-        let users = userManager.userStorage.getUsers()
-        XCTAssertEqual(users.count, 1, "User should exist with an initial Application ID")
+        userManager.createUser(params: initialUser) { _ in
+            // Check if the data exist
+            let users = userManager.userStorage.getUsers()
+            XCTAssertEqual(users.count, 1, "User should exist with an initial Application ID")
+            expectation.fulfill()
+        }
+        
+        wait(for: [expectation], timeout: 10.0)
         
         // Second init with a different App ID
         userManager.initApplication(applicationId: "AppID2", apiToken: "Token2")    // Note: Add the second application ID and API Token
