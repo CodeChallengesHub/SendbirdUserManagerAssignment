@@ -190,7 +190,7 @@ struct UserRequest<T: Decodable>: Request, URLRequestProvider {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            throw SendbirdError.decoding(.decodingFailure(error.localizedDescription))
+            throw error
         }
     }
 }

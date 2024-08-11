@@ -499,6 +499,9 @@ class MockNetworkClient: SBNetworkClient {
 서버 요청에 필요한 UserCreationParams, UserUpdateParams를 json으로 변환해서 사용하기 위해 Encodable을 채택하도록 구현했습니다.
 또한, 서버 응답을 객체로 변환하기 위해서 SBUser에 Decodable를 채택하게 했고 [SBUser]가 내려올 경우를 대비해 SBUsersResponse를 추가해서 손쉽게 객체로 변환할 수 있게 했습니다.
 
+필수적인 userId 필드의 디코딩에 실패할 경우, custom error를 발생시켜 디버깅 시 어떤 키가 누락되었는지 명확히 알 수 있도록 처리했습니다.
+또한, nickname과 profileURL은 선택적 프로퍼티로, 디코딩에 실패해도 nil로 처리되도록 하여 디코딩의 유연성을 높였습니다.
+
 ```swift
 private enum CodingKeys: String, CodingKey {
     case userId = "user_id"
@@ -527,9 +530,14 @@ extension UserUpdateParams: Encodable {
 extension SBUser: Decodable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let userId = try container.decode(String.self, forKey: .userId)
-        let nickname = try container.decode(String.self, forKey: .nickname)
-        let profileURL = try container.decode(String.self, forKey: .profileURL)
+        let userId: String
+        do {
+            userId =  try container.decode(String.self, forKey: .userId)
+        } catch {
+            throw SendbirdError.decoding(.keyNotFound("user_id"))
+        }
+        let nickname = try? container.decode(String.self, forKey: .nickname)
+        let profileURL = try? container.decode(String.self, forKey: .profileURL)
         
         self.init(userId: userId, nickname: nickname, profileURL: profileURL)
     }
@@ -542,7 +550,7 @@ struct SBUsersResponse: Decodable {
 extension Encodable {
     func toDictionary() -> [String: Any] {
         guard let data = try? JSONEncoder().encode(self) else { return [:] }
-        return (try? JSONSerialization.jsonObject(with: data, options: .allowFragments)).flatMap { $0 as? [String: Any] } ?? [:]
+        return (try? JSONSerialization.jsonObject(with: data)).flatMap { $0 as? [String: Any] } ?? [:]
     }
 }
 ```
@@ -696,7 +704,7 @@ class TokenLeakyBucketRateLimiter {
         queue.async { [weak self] in
             guard let self = self else { return }
             
-            refillTokens()
+            self.refillTokens()
             
             if self.availableTokens > 0 {
                 self.availableTokens -= 1
@@ -803,7 +811,7 @@ enum SendbirdError: Error {
     }
 
     enum DecodingError: Error {
-        case decodingFailure(String) // 데이터 디코딩 실패 오류
+        case keyNotFound(String) // 특정 키를 찾을 수 없음
     }
 }
 ```

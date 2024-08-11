@@ -60,7 +60,7 @@ class TokenLeakyBucketRateLimiter {
         queue.async { [weak self] in
             guard let self = self else { return }
             
-            refillTokens()
+            self.refillTokens()
             
             if self.availableTokens > 0 {
                 self.availableTokens -= 1

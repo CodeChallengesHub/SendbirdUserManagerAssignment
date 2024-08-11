@@ -46,6 +46,6 @@ enum SendbirdError: Error {
     }
 
     enum DecodingError: Error {
-        case decodingFailure(String) // 데이터 디코딩 실패 오류
+        case keyNotFound(String) // 특정 키를 찾을 수 없음
     }
 }

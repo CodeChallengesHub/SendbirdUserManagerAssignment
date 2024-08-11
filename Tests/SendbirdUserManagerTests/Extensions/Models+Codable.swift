@@ -30,7 +30,7 @@ private enum CodingKeys: String, CodingKey {
     case profileURL = "profile_url"
 }
 
-/// Encodable을 채택하여 JJSON 인코딩이 가능하도록 설계했습니다.
+/// Encodable을 채택하여 JSON 인코딩이 가능하도록 설계했습니다.
 extension UserCreationParams: Encodable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -40,7 +40,7 @@ extension UserCreationParams: Encodable {
     }
 }
 
-/// Encodable을 채택하여 JJSON 인코딩이 가능하도록 설계했습니다.
+/// Encodable을 채택하여 JSON 인코딩이 가능하도록 설계했습니다.
 extension UserUpdateParams: Encodable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -50,18 +50,26 @@ extension UserUpdateParams: Encodable {
     }
 }
 
-/// Decodable을 채택하여 JSON 데이터를 쉽게 객체로 변환할 수 있게 했습니다.
+/// SBUser를 Decodable로 확장하여 JSON 데이터를 SBUser 객체로 쉽게 변환할 수 있게 했습니다.
+/// 이 과정에서 필수적인 userId 필드의 디코딩에 실패할 경우, custom error를 발생시켜
+/// 디버깅 시 어떤 키가 누락되었는지 명확히 알 수 있도록 처리했습니다.
+/// 또한, nickname과 profileURL은 선택적 프로퍼티로, 디코딩에 실패해도 nil로 처리되도록 하여
+/// 디코딩의 유연성을 높였습니다.
 extension SBUser: Decodable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let userId = try container.decode(String.self, forKey: .userId)
-        let nickname = try container.decode(String.self, forKey: .nickname)
-        let profileURL = try container.decode(String.self, forKey: .profileURL)
+        let userId: String
+        do {
+            userId =  try container.decode(String.self, forKey: .userId)
+        } catch {
+            throw SendbirdError.decoding(.keyNotFound("user_id"))
+        }
+        let nickname = try? container.decode(String.self, forKey: .nickname)
+        let profileURL = try? container.decode(String.self, forKey: .profileURL)
         
         self.init(userId: userId, nickname: nickname, profileURL: profileURL)
     }
 }
-
 
 /**
  `SBUsersResponse` 구조체는 `[SBUser]`와 같은 배열 형태의 응답을 처리하기 위해 설계되었습니다.
@@ -77,6 +85,6 @@ struct SBUsersResponse: Decodable {
 extension Encodable {
     func toDictionary() -> [String: Any] {
         guard let data = try? JSONEncoder().encode(self) else { return [:] }
-        return (try? JSONSerialization.jsonObject(with: data, options: .allowFragments)).flatMap { $0 as? [String: Any] } ?? [:]
+        return (try? JSONSerialization.jsonObject(with: data)).flatMap { $0 as? [String: Any] } ?? [:]
     }
 }
